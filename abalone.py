@@ -4,6 +4,7 @@ from enum import Enum
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Set, Dict
 import sys
+import random
 
 # Konstanten
 WINDOW_WIDTH = 1200
@@ -11,18 +12,39 @@ WINDOW_HEIGHT = 800
 HEX_SIZE = 35
 FPS = 60
 
-# Material Design Farben
-BACKGROUND_COLOR = (44, 46, 59)  # #2C2E3B
-BOARD_COLOR = (69, 71, 90)
-HIGHLIGHT_COLOR = (76, 175, 80)  # Material Green
-VALID_MOVE_COLOR = (76, 175, 80, 100)  # Semi-transparent green
-BLACK_MARBLE_COLOR = (33, 33, 33)
-WHITE_MARBLE_COLOR = (240, 240, 240)
-SELECTED_GLOW = (255, 193, 7)  # Material Amber
-HOVER_GLOW = (100, 181, 246)  # Material Light Blue
+# Enhanced Color Scheme
+BACKGROUND_COLOR = (15, 20, 35)  # Deep navy
+BOARD_GRADIENT_START = (45, 55, 75)  # Darker blue-gray
+BOARD_GRADIENT_END = (65, 75, 95)  # Lighter blue-gray
+BOARD_BORDER_COLOR = (25, 35, 55)  # Dark border
+BOARD_HIGHLIGHT_COLOR = (85, 95, 115)  # Light border
+
+HIGHLIGHT_COLOR = (102, 187, 106)  # Material Green 400
+VALID_MOVE_COLOR = (102, 187, 106, 120)  # Semi-transparent green
+INVALID_MOVE_COLOR = (244, 67, 54, 80)  # Semi-transparent red
+
+# Marble colors with gradients
+BLACK_MARBLE_DARK = (20, 20, 25)
+BLACK_MARBLE_LIGHT = (45, 45, 55)
+BLACK_MARBLE_HIGHLIGHT = (80, 80, 90)
+
+WHITE_MARBLE_DARK = (220, 220, 225)
+WHITE_MARBLE_LIGHT = (245, 245, 250)
+WHITE_MARBLE_HIGHLIGHT = (255, 255, 255)
+
+# UI colors
+SELECTED_GLOW = (255, 193, 7, 150)  # Material Amber with alpha
+HOVER_GLOW = (100, 181, 246, 100)  # Material Light Blue with alpha
 TEXT_COLOR = (255, 255, 255)
-BUTTON_COLOR = (63, 81, 181)  # Material Indigo
-BUTTON_HOVER_COLOR = (92, 107, 192)
+TEXT_SHADOW_COLOR = (0, 0, 0, 100)
+
+# Button colors
+BUTTON_GRADIENT_START = (63, 81, 181)
+BUTTON_GRADIENT_END = (48, 63, 159)
+BUTTON_HOVER_START = (92, 107, 192)
+BUTTON_HOVER_END = (75, 93, 173)
+BUTTON_BORDER_COLOR = (33, 51, 131)
+BUTTON_TEXT_SHADOW = (0, 0, 0, 150)
 
 # Richtungen in Axialkoordinaten
 DIRECTIONS = [
@@ -74,20 +96,74 @@ class Player(Enum):
 	EMPTY = None
 
 
+def draw_gradient_rect(surface, rect, start_color, end_color, vertical=True):
+	"""Zeichnet ein Rechteck mit Farbverlauf"""
+	if vertical:
+		for y in range(rect.height):
+			ratio = y / rect.height
+			color = [
+				int(start_color[i] + (end_color[i] - start_color[i]) * ratio)
+				for i in range(3)
+			]
+			pygame.draw.line(surface, color, 
+							(rect.x, rect.y + y), 
+							(rect.x + rect.width, rect.y + y))
+	else:
+		for x in range(rect.width):
+			ratio = x / rect.width
+			color = [
+				int(start_color[i] + (end_color[i] - start_color[i]) * ratio)
+				for i in range(3)
+			]
+			pygame.draw.line(surface, color, 
+							(rect.x + x, rect.y), 
+							(rect.x + x, rect.y + rect.height))
+
+def draw_gradient_circle(surface, center, radius, inner_color, outer_color):
+	"""Zeichnet einen Kreis mit radialem Farbverlauf"""
+	for r in range(radius, 0, -1):
+		ratio = (radius - r) / radius
+		color = [
+			int(outer_color[i] + (inner_color[i] - outer_color[i]) * ratio)
+			for i in range(3)
+		]
+		pygame.draw.circle(surface, color, center, r)
+
 class Button:
-	"""Einfache Button-Klasse für UI"""
+	"""Erweiterte Button-Klasse mit Farbverläufen"""
 
 	def __init__(self, x, y, width, height, text, font):
 		self.rect = pygame.Rect(x, y, width, height)
 		self.text = text
 		self.font = font
 		self.hovered = False
+		self.pressed = False
 
 	def draw(self, screen):
-		color = BUTTON_HOVER_COLOR if self.hovered else BUTTON_COLOR
-		pygame.draw.rect(screen, color, self.rect, border_radius=5)
+		# Farbverlauf je nach Zustand
+		if self.hovered:
+			start_color = BUTTON_HOVER_START
+			end_color = BUTTON_HOVER_END
+		else:
+			start_color = BUTTON_GRADIENT_START
+			end_color = BUTTON_GRADIENT_END
+		
+		# Rand zeichnen
+		border_rect = self.rect.inflate(4, 4)
+		pygame.draw.rect(screen, BUTTON_BORDER_COLOR, border_rect, border_radius=8)
+		
+		# Farbverlauf zeichnen
+		draw_gradient_rect(screen, self.rect, start_color, end_color)
+		
+		# Text mit Schatten
 		text_surface = self.font.render(self.text, True, TEXT_COLOR)
+		shadow_surface = self.font.render(self.text, True, (0, 0, 0))
 		text_rect = text_surface.get_rect(center=self.rect.center)
+		shadow_rect = text_rect.copy()
+		shadow_rect.x += 1
+		shadow_rect.y += 1
+		
+		screen.blit(shadow_surface, shadow_rect)
 		screen.blit(text_surface, text_rect)
 
 	def handle_event(self, event):
@@ -481,6 +557,7 @@ class AbaloneUI:
 		self.clock = pygame.time.Clock()
 		self.font = pygame.font.Font(None, 36)
 		self.small_font = pygame.font.Font(None, 24)
+		self.large_font = pygame.font.Font(None, 48)
 
 		self.game = AbaloneGame()
 		self.center_x = WINDOW_WIDTH // 2
@@ -492,12 +569,72 @@ class AbaloneUI:
 		self.selected_marbles = []
 		self.mouse_pos = (0, 0)
 
-		# Buttons
-		self.new_game_button = Button(50, 50, 150, 40, "Neues Spiel", self.small_font)
-		self.quit_button = Button(50, 100, 150, 40, "Beenden", self.small_font)
+		# Buttons mit verbessertem Design und besserer Position
+		self.new_game_button = Button(30, 80, 200, 55, "Neues Spiel", self.small_font)
+		self.quit_button = Button(30, 150, 200, 55, "Beenden", self.small_font)
 
-		# Animation
+		# Animation und Effekte
 		self.animations = []
+		self.particles = []
+		self.background_pattern = self._create_background_pattern()
+		self.animation_time = 0
+
+	def _create_background_pattern(self):
+		"""Erstellt ein Hintergrundmuster"""
+		pattern = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+		
+		# Gradient background
+		for y in range(WINDOW_HEIGHT):
+			ratio = y / WINDOW_HEIGHT
+			color = [
+				int(BACKGROUND_COLOR[i] + (BOARD_GRADIENT_START[i] - BACKGROUND_COLOR[i]) * ratio * 0.3)
+				for i in range(3)
+			]
+			pygame.draw.line(pattern, color, (0, y), (WINDOW_WIDTH, y))
+		
+		# Subtile geometrische Muster
+		for x in range(0, WINDOW_WIDTH, 100):
+			for y in range(0, WINDOW_HEIGHT, 100):
+				if (x + y) % 200 == 0:
+					color = [min(255, c + 5) for c in BACKGROUND_COLOR]
+					pygame.draw.circle(pattern, color, (x, y), 20, 1)
+		
+		return pattern
+
+	def add_particle_effect(self, pos, color, count=10):
+		"""Fügt Partikel-Effekt hinzu"""
+		for _ in range(count):
+			particle = {
+				'pos': list(pos),
+				'vel': [random.uniform(-3, 3), random.uniform(-3, 3)],
+				'color': color,
+				'life': 1.0,
+				'size': random.uniform(2, 5)
+			}
+			self.particles.append(particle)
+
+	def update_particles(self):
+		"""Aktualisiert Partikel-Effekte"""
+		for particle in self.particles[:]:
+			particle['pos'][0] += particle['vel'][0]
+			particle['pos'][1] += particle['vel'][1]
+			particle['life'] -= 0.02
+			particle['vel'][1] += 0.1  # Gravity
+			
+			if particle['life'] <= 0:
+				self.particles.remove(particle)
+
+	def draw_particles(self):
+		"""Zeichnet Partikel-Effekte"""
+		for particle in self.particles:
+			alpha = int(255 * particle['life'])
+			if alpha > 0:
+				color = (*particle['color'][:3], alpha)
+				size = int(particle['size'] * particle['life'])
+				if size > 0:
+					s = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+					pygame.draw.circle(s, color, (size, size), size)
+					self.screen.blit(s, (particle['pos'][0] - size, particle['pos'][1] - size))
 
 	def hex_to_pixel(self, hex_pos):
 		"""Konvertiert Hex-Koordinaten zu Pixel-Koordinaten"""
@@ -534,97 +671,313 @@ class AbaloneUI:
 
 		return Hex(int(rq), int(rr))
 
-	def draw_hexagon(self, center_x, center_y, color, border_color=None):
-		"""Zeichnet ein Hexagon"""
+	def draw_hexagon(self, center_x, center_y, use_gradient=True, selected=False, valid_move=False):
+		"""Zeichnet ein verbessertes Hexagon mit Farbverläufen ohne Überlappung"""
+		# Optimierte Hexagon-Größe für größeres Spielfeld
+		hex_draw_size = HEX_SIZE * 0.9
+		
 		points = []
 		for i in range(6):
 			angle = math.pi / 3 * i + math.pi / 6
-			x = center_x + HEX_SIZE * math.cos(angle)
-			y = center_y + HEX_SIZE * math.sin(angle)
+			x = center_x + hex_draw_size * math.cos(angle)
+			y = center_y + hex_draw_size * math.sin(angle)
 			points.append((x, y))
 
-		pygame.draw.polygon(self.screen, color, points)
-		if border_color:
-			pygame.draw.polygon(self.screen, border_color, points, 2)
+		# Äußerer Rand (dunkler) - mit Abstand
+		outer_points = []
+		for i in range(6):
+			angle = math.pi / 3 * i + math.pi / 6
+			x = center_x + (hex_draw_size + 1) * math.cos(angle)
+			y = center_y + (hex_draw_size + 1) * math.sin(angle)
+			outer_points.append((x, y))
+		
+		pygame.draw.polygon(self.screen, BOARD_BORDER_COLOR, outer_points)
+
+		# Basis-Hexagon mit Farbverlauf
+		if use_gradient:
+			# Simuliere Farbverlauf durch mehrere Polygone
+			for i in range(8):  # Reduziert für bessere Performance
+				ratio = i / 8
+				color = [
+					int(BOARD_GRADIENT_START[j] + (BOARD_GRADIENT_END[j] - BOARD_GRADIENT_START[j]) * ratio)
+					for j in range(3)
+				]
+				size_factor = 1 - (i * 0.06)
+				inner_points = []
+				for k in range(6):
+					angle = math.pi / 3 * k + math.pi / 6
+					x = center_x + (hex_draw_size * size_factor) * math.cos(angle)
+					y = center_y + (hex_draw_size * size_factor) * math.sin(angle)
+					inner_points.append((x, y))
+				pygame.draw.polygon(self.screen, color, inner_points)
+		else:
+			pygame.draw.polygon(self.screen, BOARD_GRADIENT_START, points)
+
+		# Highlight-Effekte - reduzierte Größe
+		if valid_move:
+			# Grüner Glow für gültige Züge
+			s = pygame.Surface((hex_draw_size * 2.5, hex_draw_size * 2.5), pygame.SRCALPHA)
+			for i in range(10):
+				alpha = 100 - (i * 10)
+				if alpha > 0:
+					color = (*HIGHLIGHT_COLOR, alpha)
+					pygame.draw.circle(s, color, (hex_draw_size * 1.25, hex_draw_size * 1.25), 
+									  hex_draw_size * 0.6 + i * 2)
+			self.screen.blit(s, (center_x - hex_draw_size * 1.25, center_y - hex_draw_size * 1.25))
+		
+		if selected:
+			# Goldener Glow für Auswahl
+			s = pygame.Surface((hex_draw_size * 2.5, hex_draw_size * 2.5), pygame.SRCALPHA)
+			for i in range(8):
+				alpha = 120 - (i * 15)
+				if alpha > 0:
+					color = (*SELECTED_GLOW[:3], alpha)
+					pygame.draw.circle(s, color, (hex_draw_size * 1.25, hex_draw_size * 1.25), 
+									  hex_draw_size * 0.6 + i * 2)
+			self.screen.blit(s, (center_x - hex_draw_size * 1.25, center_y - hex_draw_size * 1.25))
+
+		# Innerer Highlight - angepasste Größe
+		inner_points = []
+		for i in range(6):
+			angle = math.pi / 3 * i + math.pi / 6
+			x = center_x + (hex_draw_size * 0.75) * math.cos(angle)
+			y = center_y + (hex_draw_size * 0.75) * math.sin(angle)
+			inner_points.append((x, y))
+		pygame.draw.polygon(self.screen, BOARD_HIGHLIGHT_COLOR, inner_points, 1)
 
 	def draw_board(self):
-		"""Zeichnet das Spielbrett"""
+		"""Zeichnet das verbesserte Spielbrett"""
+		# Zeichne animierten Hintergrund
+		self.screen.blit(self.background_pattern, (0, 0))
+		
+		# Subtile Animation des Hintergrunds
+		self.animation_time += 0.02
+		animation_offset = math.sin(self.animation_time) * 2
+		
+		# Zeichne Board-Rand mit Glow-Effekt
+		board_center = (self.center_x, self.center_y)
+		board_radius = HEX_SIZE * 6
+		
+		# Äußerer Glow
+		for i in range(20):
+			alpha = 30 - i
+			if alpha > 0:
+				color = (*BOARD_HIGHLIGHT_COLOR, alpha)
+				s = pygame.Surface((board_radius * 2 + i * 4, board_radius * 2 + i * 4), pygame.SRCALPHA)
+				pygame.draw.circle(s, color, (board_radius + i * 2, board_radius + i * 2), board_radius + i * 2, 2)
+				self.screen.blit(s, (board_center[0] - board_radius - i * 2, board_center[1] - board_radius - i * 2))
+		
 		for hex_pos in self.game.board:
 			x, y = self.hex_to_pixel(hex_pos)
 
-			# Basis-Hexagon
-			self.draw_hexagon(x, y, BOARD_COLOR, (100, 100, 100))
+			# Bestimme Hexagon-Zustand
+			selected = hex_pos in self.selected_marbles
+			valid_move = hex_pos in self.game.valid_moves
+			
+			# Basis-Hexagon mit Verbesserungen und Animation
+			animated_y = y + animation_offset
+			self.draw_hexagon(x, animated_y, use_gradient=True, selected=selected, valid_move=valid_move)
 
-			# Highlight für gültige Züge
-			if hex_pos in self.game.valid_moves:
-				# Zeichne semi-transparenten grünen Kreis
-				s = pygame.Surface((HEX_SIZE * 2, HEX_SIZE * 2), pygame.SRCALPHA)
-				pygame.draw.circle(s, VALID_MOVE_COLOR, (HEX_SIZE, HEX_SIZE), HEX_SIZE // 2)
-				self.screen.blit(s, (x - HEX_SIZE, y - HEX_SIZE))
+			# Hover-Effekt - angepasste Größe
+			if hex_pos == self.hovered_hex and hex_pos not in self.selected_marbles:
+				hex_draw_size = HEX_SIZE * 0.85
+				s = pygame.Surface((hex_draw_size * 2, hex_draw_size * 2), pygame.SRCALPHA)
+				for i in range(6):
+					alpha = 80 - (i * 12)
+					if alpha > 0:
+						color = (*HOVER_GLOW[:3], alpha)
+						pygame.draw.circle(s, color, (hex_draw_size, hex_draw_size), 
+										  hex_draw_size * 0.6 + i * 2)
+				self.screen.blit(s, (x - hex_draw_size, animated_y - hex_draw_size))
 
-			# Hover-Effekt
-			if hex_pos == self.hovered_hex:
-				pygame.draw.circle(self.screen, HOVER_GLOW, (x, y), HEX_SIZE // 2, 3)
-
-	def draw_marble(self, hex_pos, color, selected=False, preview=False):
-		"""Zeichnet eine Kugel"""
+	def draw_marble(self, hex_pos, player, selected=False, preview=False):
+		"""Zeichnet eine verbesserte Kugel mit 3D-Effekt"""
 		x, y = self.hex_to_pixel(hex_pos)
+		# Angepasste Kugel-Größe für bessere Darstellung
+		radius = int(HEX_SIZE * 0.4)
+
+		# Bestimme Farben basierend auf Spieler
+		if player == Player.BLACK:
+			dark_color = BLACK_MARBLE_DARK
+			light_color = BLACK_MARBLE_LIGHT
+			highlight_color = BLACK_MARBLE_HIGHLIGHT
+		else:
+			dark_color = WHITE_MARBLE_DARK
+			light_color = WHITE_MARBLE_LIGHT
+			highlight_color = WHITE_MARBLE_HIGHLIGHT
 
 		if preview:
 			# Transparente Vorschau
 			s = pygame.Surface((HEX_SIZE * 2, HEX_SIZE * 2), pygame.SRCALPHA)
 
-			# Schatten (noch transparenter)
-			pygame.draw.circle(s, (20, 20, 20, 50), (HEX_SIZE + 2, HEX_SIZE + 2), HEX_SIZE // 2 - 5)
+			# Schatten
+			pygame.draw.circle(s, (0, 0, 0, 40), (HEX_SIZE + 3, HEX_SIZE + 3), radius)
 
-			# Kugel (transparent)
-			marble_color = (*color, 100)  # Alpha = 100 für Transparenz
-			pygame.draw.circle(s, marble_color, (HEX_SIZE, HEX_SIZE), HEX_SIZE // 2 - 5)
+			# Basis-Kugel mit Transparenz
+			for i in range(radius, 0, -2):
+				ratio = (radius - i) / radius
+				color = [
+					int(dark_color[j] + (light_color[j] - dark_color[j]) * ratio)
+					for j in range(3)
+				]
+				color.append(80)  # Alpha für Transparenz
+				pygame.draw.circle(s, color, (HEX_SIZE, HEX_SIZE), i)
 
-			# Glanzlicht (transparent)
-			pygame.draw.circle(s, (255, 255, 255, 30), (HEX_SIZE - 5, HEX_SIZE - 5), HEX_SIZE // 4)
+			# Glanzlicht
+			pygame.draw.circle(s, (*highlight_color, 60), (HEX_SIZE - 8, HEX_SIZE - 8), radius // 3)
 
 			self.screen.blit(s, (x - HEX_SIZE, y - HEX_SIZE))
 		else:
-			# Normale Darstellung
-			# Schatten
-			pygame.draw.circle(self.screen, (20, 20, 20), (x + 2, y + 2), HEX_SIZE // 2 - 5)
+			# Normale Darstellung mit 3D-Effekt
+			# Schatten (mehrschichtig für weicheren Effekt)
+			for i in range(5):
+				alpha = 60 - (i * 10)
+				if alpha > 0:
+					s = pygame.Surface((radius * 2 + 10, radius * 2 + 10), pygame.SRCALPHA)
+					pygame.draw.circle(s, (0, 0, 0, alpha), (radius + 5, radius + 5), radius + i)
+					self.screen.blit(s, (x - radius - 5 + 2, y - radius - 5 + 2))
 
-			# Kugel
-			pygame.draw.circle(self.screen, color, (x, y), HEX_SIZE // 2 - 5)
+			# Radialer Farbverlauf für 3D-Effekt
+			for i in range(radius, 0, -1):
+				ratio = (radius - i) / radius
+				color = [
+					int(dark_color[j] + (light_color[j] - dark_color[j]) * ratio)
+					for j in range(3)
+				]
+				pygame.draw.circle(self.screen, color, (x, y), i)
 
-			# Glanzlicht
-			pygame.draw.circle(self.screen, (255, 255, 255, 50), (x - 5, y - 5), HEX_SIZE // 4)
+			# Mehrere Glanzlichter für realistischen Effekt
+			# Hauptglanzlicht
+			pygame.draw.circle(self.screen, highlight_color, (x - 8, y - 8), radius // 3)
+			# Sekundäres Glanzlicht
+			pygame.draw.circle(self.screen, highlight_color, (x - 12, y - 6), radius // 6)
+			# Subtiler Rim-Light
+			pygame.draw.circle(self.screen, light_color, (x, y), radius, 1)
 
-			# Auswahlmarkierung
+			# Auswahlmarkierung mit Glow-Effekt
 			if selected:
-				pygame.draw.circle(self.screen, SELECTED_GLOW, (x, y), HEX_SIZE // 2 - 3, 3)
+				s = pygame.Surface((radius * 3, radius * 3), pygame.SRCALPHA)
+				for i in range(12):
+					alpha = 200 - (i * 16)
+					if alpha > 0:
+						color = (*SELECTED_GLOW[:3], alpha)
+						pygame.draw.circle(s, color, (radius * 1.5, radius * 1.5), radius + i)
+				self.screen.blit(s, (x - radius * 1.5, y - radius * 1.5))
 
 	def draw_ui(self):
-		"""Zeichnet die UI-Elemente"""
-		# Spieler-Info
+		"""Zeichnet die verbesserten UI-Elemente"""
+		# Rechtes UI-Panel mit verbesserter Größe und Position
+		ui_rect = pygame.Rect(WINDOW_WIDTH - 380, 80, 350, 250)
+		
+		# Panel-Hintergrund mit stärkerem Kontrast
+		panel_bg = pygame.Surface((ui_rect.width, ui_rect.height), pygame.SRCALPHA)
+		draw_gradient_rect(panel_bg, pygame.Rect(0, 0, ui_rect.width, ui_rect.height), 
+						  (35, 40, 60, 220), (55, 65, 85, 220))
+		self.screen.blit(panel_bg, ui_rect.topleft)
+		
+		# Rand mit besserer Sichtbarkeit
+		pygame.draw.rect(self.screen, (80, 90, 110), ui_rect, 3, border_radius=12)
+		pygame.draw.rect(self.screen, (120, 130, 150), ui_rect, 1, border_radius=12)
+		
+		# Spieler-Info mit verbesserter Lesbarkeit
 		player_text = "Schwarz" if self.game.current_player == Player.BLACK else "Weiß"
-		text_surface = self.font.render(f"Am Zug: {player_text}", True, TEXT_COLOR)
-		self.screen.blit(text_surface, (WINDOW_WIDTH - 300, 50))
+		player_color = (220, 220, 230) if self.game.current_player == Player.BLACK else (255, 255, 255)
+		
+		# Aktueller Spieler - größerer Text
+		current_player_text = f"Am Zug:"
+		player_name_text = f"{player_text}"
+		
+		# Header-Text
+		header_shadow = self.font.render(current_player_text, True, (0, 0, 0, 180))
+		header_text = self.font.render(current_player_text, True, (200, 210, 230))
+		self.screen.blit(header_shadow, (ui_rect.x + 21, ui_rect.y + 21))
+		self.screen.blit(header_text, (ui_rect.x + 20, ui_rect.y + 20))
+		
+		# Spielername - noch größer und farbig
+		name_shadow = self.large_font.render(player_name_text, True, (0, 0, 0, 200))
+		name_text = self.large_font.render(player_name_text, True, player_color)
+		self.screen.blit(name_shadow, (ui_rect.x + 21, ui_rect.y + 51))
+		self.screen.blit(name_text, (ui_rect.x + 20, ui_rect.y + 50))
 
-		# Punktestand
-		black_score = self.font.render(f"Schwarz: {self.game.scores[Player.BLACK]}/6", True, TEXT_COLOR)
-		white_score = self.font.render(f"Weiß: {self.game.scores[Player.WHITE]}/6", True, TEXT_COLOR)
-		self.screen.blit(black_score, (WINDOW_WIDTH - 300, 100))
-		self.screen.blit(white_score, (WINDOW_WIDTH - 300, 140))
+		# Punktestand-Sektion mit besserer Strukturierung
+		score_y_start = ui_rect.y + 100
+		
+		# "Punktestand" Titel
+		score_title_shadow = self.font.render("Punktestand:", True, (0, 0, 0, 180))
+		score_title = self.font.render("Punktestand:", True, (200, 210, 230))
+		self.screen.blit(score_title_shadow, (ui_rect.x + 21, score_y_start + 1))
+		self.screen.blit(score_title, (ui_rect.x + 20, score_y_start))
+		
+		# Schwarz Score
+		black_score_text = f"Schwarz: {self.game.scores[Player.BLACK]}/6"
+		black_shadow = self.font.render(black_score_text, True, (0, 0, 0, 200))
+		black_score = self.font.render(black_score_text, True, (180, 180, 190))
+		self.screen.blit(black_shadow, (ui_rect.x + 21, score_y_start + 31))
+		self.screen.blit(black_score, (ui_rect.x + 20, score_y_start + 30))
+		
+		# Weiß Score
+		white_score_text = f"Weiß: {self.game.scores[Player.WHITE]}/6"
+		white_shadow = self.font.render(white_score_text, True, (0, 0, 0, 200))
+		white_score = self.font.render(white_score_text, True, (255, 255, 255))
+		self.screen.blit(white_shadow, (ui_rect.x + 21, score_y_start + 61))
+		self.screen.blit(white_score, (ui_rect.x + 20, score_y_start + 60))
+		
+		# Score-Balken mit besserer Sichtbarkeit
+		bar_width = 250
+		bar_height = 12
+		bar_x = ui_rect.x + 20
+		
+		# Schwarz Balken
+		black_bar_rect = pygame.Rect(bar_x, score_y_start + 95, bar_width, bar_height)
+		pygame.draw.rect(self.screen, (40, 45, 60), black_bar_rect, border_radius=6)
+		pygame.draw.rect(self.screen, (70, 75, 90), black_bar_rect, 2, border_radius=6)
+		
+		black_progress = pygame.Rect(bar_x, score_y_start + 95, 
+									(bar_width * self.game.scores[Player.BLACK]) // 6, bar_height)
+		if black_progress.width > 0:
+			pygame.draw.rect(self.screen, (120, 120, 140), black_progress, border_radius=6)
+		
+		# Weiß Balken
+		white_bar_rect = pygame.Rect(bar_x, score_y_start + 115, bar_width, bar_height)
+		pygame.draw.rect(self.screen, (40, 45, 60), white_bar_rect, border_radius=6)
+		pygame.draw.rect(self.screen, (70, 75, 90), white_bar_rect, 2, border_radius=6)
+		
+		white_progress = pygame.Rect(bar_x, score_y_start + 115, 
+									(bar_width * self.game.scores[Player.WHITE]) // 6, bar_height)
+		if white_progress.width > 0:
+			pygame.draw.rect(self.screen, (255, 255, 255), white_progress, border_radius=6)
 
-		# Buttons
+		# Buttons mit mehr Abstand zum Panel
 		self.new_game_button.draw(self.screen)
 		self.quit_button.draw(self.screen)
 
-		# Gewinner-Nachricht
+		# Gewinner-Nachricht mit Effekt
 		winner = self.game.check_winner()
 		if winner:
 			winner_text = "Schwarz" if winner == Player.BLACK else "Weiß"
-			win_surface = self.font.render(f"{winner_text} hat gewonnen!", True, SELECTED_GLOW)
-			win_rect = win_surface.get_rect(center=(WINDOW_WIDTH // 2, 100))
-			pygame.draw.rect(self.screen, BACKGROUND_COLOR, win_rect.inflate(20, 10))
+			
+			# Hintergrund mit Glow
+			wins_bg_rect = pygame.Rect(0, 100, WINDOW_WIDTH, 100)
+			win_bg = pygame.Surface((WINDOW_WIDTH, 100), pygame.SRCALPHA)
+			draw_gradient_rect(win_bg, pygame.Rect(0, 0, WINDOW_WIDTH, 100), 
+							  (255, 193, 7, 200), (102, 187, 106, 200))
+			self.screen.blit(win_bg, (0, 100))
+			
+			# Text mit größerer Schrift und besserem Kontrast
+			win_text = f"🎉 {winner_text} hat gewonnen! 🎉"
+			win_shadow = self.large_font.render(win_text, True, (0, 0, 0))
+			win_surface = self.large_font.render(win_text, True, (255, 255, 255))
+			win_rect = win_surface.get_rect(center=(WINDOW_WIDTH // 2, 150))
+			win_shadow_rect = win_rect.copy()
+			win_shadow_rect.x += 3
+			win_shadow_rect.y += 3
+			
+			self.screen.blit(win_shadow, win_shadow_rect)
 			self.screen.blit(win_surface, win_rect)
+			
+			# Partikel-Effekt für Gewinn
+			if random.random() < 0.3:
+				self.add_particle_effect((WINDOW_WIDTH // 2, 150), SELECTED_GLOW[:3])
 
 	def draw_preview(self):
 		"""Zeichnet eine Vorschau der ausgewählten Kugeln an der Mausposition"""
@@ -684,8 +1037,7 @@ class AbaloneUI:
 		for marble in self.selected_marbles:
 			new_pos = marble.neighbor(direction)
 			if self.game._is_valid_position(new_pos):
-				color = BLACK_MARBLE_COLOR if self.game.current_player == Player.BLACK else WHITE_MARBLE_COLOR
-				self.draw_marble(new_pos, color, preview=True)
+				self.draw_marble(new_pos, self.game.current_player, preview=True)
 
 	def handle_click(self, pos):
 		"""Verarbeitet Mausklicks"""
@@ -709,6 +1061,10 @@ class AbaloneUI:
 		# Klick auf gültigen Zug
 		elif hex_pos in self.game.valid_moves:
 			if self.game.make_move(self.selected_marbles, hex_pos):
+				# Partikel-Effekt für erfolgreichen Zug
+				pixel_pos = self.hex_to_pixel(hex_pos)
+				self.add_particle_effect(pixel_pos, HIGHLIGHT_COLOR, 8)
+				
 				self.selected_marbles = []
 				self.game.valid_moves = set()
 
@@ -742,20 +1098,21 @@ class AbaloneUI:
 						self.hovered_hex = None
 
 			# Bildschirm zeichnen
-			self.screen.fill(BACKGROUND_COLOR)
-
-			# Zeichne Brett
+			# Zeichne Brett (enthält jetzt Hintergrund)
 			self.draw_board()
 
 			# Zeichne Kugeln
 			for hex_pos, player in self.game.board.items():
 				if player != Player.EMPTY:
-					color = BLACK_MARBLE_COLOR if player == Player.BLACK else WHITE_MARBLE_COLOR
 					selected = hex_pos in self.selected_marbles
-					self.draw_marble(hex_pos, color, selected)
+					self.draw_marble(hex_pos, player, selected)
 
 			# Zeichne Vorschau
 			self.draw_preview()
+
+			# Update und zeichne Partikel
+			self.update_particles()
+			self.draw_particles()
 
 			# Zeichne UI
 			self.draw_ui()
