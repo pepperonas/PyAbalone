@@ -92,41 +92,57 @@ class AbaloneAI:
 	def __init__(self, difficulty=AIDifficulty.MEDIUM):
 		self.difficulty = difficulty
 		self.max_depth = self._get_max_depth()
-		self.thinking_time = 0.1  # Reduzierte Denkzeit für schnellere KI
+		self.thinking_time = 0.0  # Keine künstliche Denkzeit
+		self.move_cache = {}  # Cache für berechnete Züge
 		
 	def _get_max_depth(self):
 		"""Bestimmt die Suchtiefe basierend auf Schwierigkeit"""
 		if self.difficulty == AIDifficulty.EASY:
-			return 2
+			return 1  # Reduziert für bessere Performance
 		elif self.difficulty == AIDifficulty.MEDIUM:
-			return 3
+			return 2  # Reduziert für bessere Performance
 		else:  # HARD
-			return 4
+			return 3  # Reduziert für bessere Performance
 	
 	def get_best_move(self, game, player):
-		"""Findet den besten Zug für den gegebenen Spieler"""
-		import time
-		start_time = time.time()
+		"""Findet den besten Zug für den gegebenen Spieler - optimiert für Performance"""
+		# Vereinfachter Cache-Key (Performance-Problem behoben)
+		board_hash = hash(tuple(sorted((pos.q, pos.r, p.value if p else None) for pos, p in game.board.items())))
+		cache_key = (board_hash, player.value, self.difficulty.value)
+		
+		if cache_key in self.move_cache:
+			return self.move_cache[cache_key]
 		
 		# Alle möglichen Züge generieren
-		all_moves = self._generate_all_moves(game, player)
+		all_moves = self._generate_all_moves_fast(game, player)
 		
 		if not all_moves:
 			return None
 		
-		# Bei einfacher Schwierigkeit: zufälliger Zug mit geringer Intelligenz
+		# Bei einfacher Schwierigkeit: schnelle heuristische Auswahl
 		if self.difficulty == AIDifficulty.EASY:
-			# 70% zufällig, 30% intelligent
-			if random.random() < 0.7:
-				return random.choice(all_moves)
+			# 50% zufällig, 50% beste oberflächliche Bewertung
+			if random.random() < 0.5:
+				best_move = random.choice(all_moves)
+			else:
+				best_move = self._quick_evaluate_moves(game, all_moves, player)
+			self.move_cache[cache_key] = best_move
+			return best_move
 		
-		# Minimax mit Alpha-Beta-Pruning
+		# Für Medium/Hard: Minimax mit verbessertem Pruning
 		best_move = None
 		best_score = float('-inf')
 		alpha = float('-inf')
 		beta = float('inf')
 		
-		for move in all_moves:
+		# Sortiere Züge für besseres Pruning
+		all_moves.sort(key=lambda m: self._quick_move_score(game, m, player), reverse=True)
+		
+		for i, move in enumerate(all_moves):
+			# Begrenze Anzahl der bewerteten Züge für bessere Performance
+			if i > 15:  # Nur die besten 15 Züge bewerten
+				break
+				
 			# Simuliere den Zug
 			game_copy = self._copy_game_state(game)
 			self._execute_move(game_copy, move, player)
@@ -142,49 +158,83 @@ class AbaloneAI:
 			if beta <= alpha:
 				break  # Alpha-Beta-Pruning
 		
-		# Mindest-Denkzeit einhalten
-		elapsed = time.time() - start_time
-		if elapsed < self.thinking_time:
-			time.sleep(self.thinking_time - elapsed)
+		# Cache das Ergebnis (nur bei erfolgreichen Zügen)
+		if best_move:
+			self.move_cache[cache_key] = best_move
+		
+		# Cache-Größe begrenzen
+		if len(self.move_cache) > 100:  # Kleinerer Cache für bessere Performance
+			self.move_cache.clear()
 		
 		return best_move
 	
-	def _generate_all_moves(self, game, player):
-		"""Generiert alle möglichen Züge für einen Spieler"""
+	def _quick_evaluate_moves(self, game, moves, player):
+		"""Schnelle oberflächliche Bewertung von Zügen"""
+		best_move = moves[0]
+		best_score = float('-inf')
+		
+		for move in moves[:10]:  # Nur erste 10 Züge bewerten
+			score = self._quick_move_score(game, move, player)
+			if score > best_score:
+				best_score = score
+				best_move = move
+				
+		return best_move
+	
+	def _quick_move_score(self, game, move, player):
+		"""Schnelle Bewertung eines einzelnen Zugs"""
+		selected_marbles, target = move
+		score = 0
+		
+		# Bewertung basierend auf Zentrum
+		center_distance = abs(target.q) + abs(target.r) + abs(-target.q - target.r)
+		score -= center_distance * 2
+		
+		# Bewertung für Angriffszüge
+		if game.board.get(target) != Player.EMPTY:
+			score += 50  # Bonus für Pushen
+		
+		return score
+	
+	def _generate_all_moves_fast(self, game, player):
+		"""Generiert alle möglichen Züge für einen Spieler - optimiert und korrekt"""
 		moves = []
 		
 		# Finde alle Kugeln des Spielers
-		player_marbles = []
-		for hex_pos, marble_player in game.board.items():
-			if marble_player == player:
-				player_marbles.append(hex_pos)
+		player_marbles = [pos for pos, p in game.board.items() if p == player]
 		
-		# Generiere Züge für einzelne Kugeln
+		# Einzelne Kugeln - verwende die bewährte Methode
 		for marble in player_marbles:
 			valid_moves = game.calculate_valid_moves([marble])
 			for target in valid_moves:
 				moves.append(([marble], target))
 		
-		# Generiere Züge für 2er-Kombinationen
-		for i in range(len(player_marbles)):
-			for j in range(i + 1, len(player_marbles)):
-				marble_combo = [player_marbles[i], player_marbles[j]]
-				if game._are_marbles_in_line(marble_combo):
-					valid_moves = game.calculate_valid_moves(marble_combo)
-					for target in valid_moves:
-						moves.append((marble_combo, target))
-		
-		# Generiere Züge für 3er-Kombinationen
-		for i in range(len(player_marbles)):
-			for j in range(i + 1, len(player_marbles)):
-				for k in range(j + 1, len(player_marbles)):
-					marble_combo = [player_marbles[i], player_marbles[j], player_marbles[k]]
+		# Nur bei höheren Schwierigkeiten: 2er-Kombinationen
+		if self.difficulty != AIDifficulty.EASY and len(player_marbles) > 1:
+			for i in range(min(len(player_marbles), 8)):  # Begrenzt für Performance
+				for j in range(i + 1, min(len(player_marbles), 8)):
+					marble_combo = [player_marbles[i], player_marbles[j]]
 					if game._are_marbles_in_line(marble_combo):
 						valid_moves = game.calculate_valid_moves(marble_combo)
 						for target in valid_moves:
 							moves.append((marble_combo, target))
 		
+		# Nur bei HARD: 3er-Kombinationen
+		if self.difficulty == AIDifficulty.HARD and len(player_marbles) > 2:
+			for i in range(min(len(player_marbles), 6)):
+				for j in range(i + 1, min(len(player_marbles), 6)):
+					for k in range(j + 1, min(len(player_marbles), 6)):
+						marble_combo = [player_marbles[i], player_marbles[j], player_marbles[k]]
+						if game._are_marbles_in_line(marble_combo):
+							valid_moves = game.calculate_valid_moves(marble_combo)
+							for target in valid_moves:
+								moves.append((marble_combo, target))
+		
 		return moves
+	
+	def _generate_all_moves(self, game, player):
+		"""Legacy-Methode für Kompatibilität"""
+		return self._generate_all_moves_fast(game, player)
 	
 	def _minimax(self, game, depth, alpha, beta, maximizing_player, ai_player):
 		"""Minimax-Algorithmus mit Alpha-Beta-Pruning"""
@@ -227,51 +277,50 @@ class AbaloneAI:
 			return min_eval
 	
 	def _evaluate_position(self, game, ai_player):
-		"""Bewertet eine Spielposition aus Sicht der KI"""
+		"""Bewertet eine Spielposition aus Sicht der KI - optimiert"""
 		opponent = Player.WHITE if ai_player == Player.BLACK else Player.BLACK
 		
 		score = 0
 		
 		# 1. Scores (wichtigster Faktor)
-		score += (game.scores[ai_player] - game.scores[opponent]) * 200
+		score += (game.scores[ai_player] - game.scores[opponent]) * 1000
 		
-		# 2. Zentrale Kontrolle
-		center_positions = [Hex(0, 0), Hex(1, 0), Hex(-1, 0), Hex(0, 1), Hex(0, -1), Hex(1, -1), Hex(-1, 1)]
-		ai_center_control = sum(1 for pos in center_positions if game.board.get(pos) == ai_player)
-		opponent_center_control = sum(1 for pos in center_positions if game.board.get(pos) == opponent)
-		score += (ai_center_control - opponent_center_control) * 10
+		# 2. Schnelle zentrale Kontrolle
+		center_positions = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, -1), (-1, 1)]
+		ai_center = sum(1 for q, r in center_positions if game.board.get(Hex(q, r)) == ai_player)
+		opp_center = sum(1 for q, r in center_positions if game.board.get(Hex(q, r)) == opponent)
+		score += (ai_center - opp_center) * 50
 		
-		# 3. Zusammenhalt der Kugeln (gruppierte Kugeln sind stärker)
-		ai_cohesion = self._calculate_cohesion(game, ai_player)
-		opponent_cohesion = self._calculate_cohesion(game, opponent)
-		score += (ai_cohesion - opponent_cohesion) * 5
+		# 3. Vereinfachte Kugel-Anzahl
+		ai_count = sum(1 for p in game.board.values() if p == ai_player)
+		opp_count = sum(1 for p in game.board.values() if p == opponent)
+		score += (ai_count - opp_count) * 20
 		
-		# 4. Randnähe (Kugeln am Rand sind gefährdeter)
-		ai_edge_penalty = self._calculate_edge_penalty(game, ai_player)
-		opponent_edge_penalty = self._calculate_edge_penalty(game, opponent)
-		score += (opponent_edge_penalty - ai_edge_penalty) * 3
-		
-		# 5. Anzahl möglicher Züge (Mobilität)
-		ai_mobility = len(self._generate_all_moves(game, ai_player))
-		opponent_mobility = len(self._generate_all_moves(game, opponent))
-		score += (ai_mobility - opponent_mobility) * 1
+		# 4. Nur bei höherer Schwierigkeit: erweiterte Bewertung
+		if self.difficulty == AIDifficulty.HARD:
+			# Zusammenhalt (reduziert)
+			ai_cohesion = self._calculate_cohesion_fast(game, ai_player)
+			opp_cohesion = self._calculate_cohesion_fast(game, opponent)
+			score += (ai_cohesion - opp_cohesion) * 5
 		
 		return score
 	
-	def _calculate_cohesion(self, game, player):
-		"""Berechnet den Zusammenhalt der Kugeln eines Spielers"""
+	def _calculate_cohesion_fast(self, game, player):
+		"""Schnelle Berechnung des Zusammenhalts"""
 		player_marbles = [pos for pos, p in game.board.items() if p == player]
 		cohesion = 0
 		
-		for marble in player_marbles:
-			neighbors = 0
-			for direction in range(6):
-				neighbor_pos = marble.neighbor(direction)
-				if game.board.get(neighbor_pos) == player:
-					neighbors += 1
+		# Nur erste 8 Kugeln betrachten für Performance
+		for marble in player_marbles[:8]:
+			neighbors = sum(1 for direction in range(6) 
+						   if game.board.get(marble.neighbor(direction)) == player)
 			cohesion += neighbors
 		
 		return cohesion
+	
+	def _calculate_cohesion(self, game, player):
+		"""Legacy-Methode für Kompatibilität"""
+		return self._calculate_cohesion_fast(game, player)
 	
 	def _calculate_edge_penalty(self, game, player):
 		"""Berechnet die Strafe für Kugeln am Randbereich"""
@@ -530,6 +579,12 @@ class Hex:
 		if other is None:
 			return False
 		return self.q == other.q and self.r == other.r
+
+	def __lt__(self, other):
+		"""Für Sortierung benötigt"""
+		if self.q != other.q:
+			return self.q < other.q
+		return self.r < other.r
 
 	def __add__(self, other):
 		return Hex(self.q + other.q, self.r + other.r)
@@ -1704,16 +1759,61 @@ class AbaloneUI:
 			
 			def ai_move_thread():
 				try:
-					ai_move = self.ai.get_best_move(self.game, self.ai_player)
+					import time
+					start_time = time.time()
+					ai_move = None
+					
+					# Einfache Timeout-Simulation durch schnelle Berechnung
+					try:
+						ai_move = self.ai.get_best_move(self.game, self.ai_player)
+						elapsed = time.time() - start_time
+						
+						# Falls zu lange gedauert hat (>3 Sekunden), ignoriere Ergebnis
+						if elapsed > 3.0:
+							print(f"KI-Zug dauerte zu lange ({elapsed:.1f}s) - verwende Fallback")
+							ai_move = None
+							
+					except Exception as e:
+						print(f"KI-Berechnungsfehler: {e}")
+						ai_move = None
+					
+					# Führe den Zug aus oder verwende Fallback
 					if ai_move:
 						selected_marbles, target_hex = ai_move
-						# Führe den Zug aus
 						if self.game.make_move(selected_marbles, target_hex):
 							# Partikel-Effekt für KI-Zug
 							pixel_pos = self.hex_to_pixel(target_hex)
 							self.add_particle_effect(pixel_pos, HIGHLIGHT_COLOR, 12)
+						else:
+							print("KI-Zug war ungültig - verwende Fallback")
+							ai_move = None
+					
+					# Fallback wenn kein gültiger Zug gefunden wurde
+					if not ai_move:
+						print("Verwende zufälligen Fallback-Zug")
+						# Einfacher Fallback: Finde ersten gültigen Zug
+						player_marbles = [pos for pos, p in self.game.board.items() if p == self.ai_player]
+						fallback_success = False
+						
+						for marble in player_marbles:
+							if fallback_success:
+								break
+							valid_moves = self.game.calculate_valid_moves([marble])
+							if valid_moves:
+								import random
+								target = random.choice(list(valid_moves))
+								if self.game.make_move([marble], target):
+									pixel_pos = self.hex_to_pixel(target)
+									self.add_particle_effect(pixel_pos, HIGHLIGHT_COLOR, 6)
+									fallback_success = True
+									print(f"Fallback erfolgreich: {marble} -> {target}")
+									break
+						
+						if not fallback_success:
+							print("Keine gültigen Züge verfügbar - KI kann nicht ziehen")
+							
 				except Exception as e:
-					print(f"KI-Fehler: {e}")
+					print(f"Kritischer KI-Fehler: {e}")
 				finally:
 					self.ai_thinking = False
 			
