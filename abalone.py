@@ -12,6 +12,470 @@ WINDOW_HEIGHT = 800
 HEX_SIZE = 35
 FPS = 60
 
+# Basis Enums (müssen vor Settings definiert werden)
+class GameState(Enum):
+	MAIN_MENU = 'main_menu'
+	SETTINGS = 'settings'
+	GAME_PVP = 'game_pvp'
+	GAME_AI = 'game_ai'
+	GAME_2V2 = 'game_2v2'
+
+class Theme(Enum):
+	CLASSIC = 'classic'
+	DARK = 'dark'
+	OCEAN = 'ocean'
+	FOREST = 'forest'
+
+class AIDifficulty(Enum):
+	EASY = 1
+	MEDIUM = 2
+	HARD = 3
+
+# Einstellungen und Konfiguration
+class Settings:
+	def __init__(self):
+		self.current_theme = Theme.CLASSIC
+		self.sound_enabled = True
+		self.ai_difficulty = AIDifficulty.MEDIUM
+		
+	def get_theme_colors(self):
+		themes = {
+			Theme.CLASSIC: {
+				'background': (15, 20, 35),
+				'board_start': (45, 55, 75),
+				'board_end': (65, 75, 95),
+				'board_border': (25, 35, 55),
+				'board_highlight': (85, 95, 115),
+				'highlight': (102, 187, 106),
+				'button_start': (63, 81, 181),
+				'button_end': (48, 63, 159)
+			},
+			Theme.DARK: {
+				'background': (10, 10, 15),
+				'board_start': (30, 30, 40),
+				'board_end': (50, 50, 60),
+				'board_border': (20, 20, 30),
+				'board_highlight': (70, 70, 80),
+				'highlight': (150, 150, 160),
+				'button_start': (40, 40, 50),
+				'button_end': (30, 30, 40)
+			},
+			Theme.OCEAN: {
+				'background': (10, 25, 40),
+				'board_start': (20, 60, 100),
+				'board_end': (40, 80, 120),
+				'board_border': (15, 45, 75),
+				'board_highlight': (60, 120, 160),
+				'highlight': (100, 200, 255),
+				'button_start': (30, 144, 255),
+				'button_end': (0, 100, 200)
+			},
+			Theme.FOREST: {
+				'background': (20, 30, 20),
+				'board_start': (40, 70, 40),
+				'board_end': (60, 90, 60),
+				'board_border': (25, 45, 25),
+				'board_highlight': (80, 120, 80),
+				'highlight': (144, 238, 144),
+				'button_start': (34, 139, 34),
+				'button_end': (0, 100, 0)
+			}
+		}
+		return themes[self.current_theme]
+
+# Globale Einstellungen
+SETTINGS = Settings()
+
+class AbaloneAI:
+	"""KI-Gegner für Abalone mit verschiedenen Schwierigkeitsgraden"""
+	
+	def __init__(self, difficulty=AIDifficulty.MEDIUM):
+		self.difficulty = difficulty
+		self.max_depth = self._get_max_depth()
+		self.thinking_time = 0.1  # Reduzierte Denkzeit für schnellere KI
+		
+	def _get_max_depth(self):
+		"""Bestimmt die Suchtiefe basierend auf Schwierigkeit"""
+		if self.difficulty == AIDifficulty.EASY:
+			return 2
+		elif self.difficulty == AIDifficulty.MEDIUM:
+			return 3
+		else:  # HARD
+			return 4
+	
+	def get_best_move(self, game, player):
+		"""Findet den besten Zug für den gegebenen Spieler"""
+		import time
+		start_time = time.time()
+		
+		# Alle möglichen Züge generieren
+		all_moves = self._generate_all_moves(game, player)
+		
+		if not all_moves:
+			return None
+		
+		# Bei einfacher Schwierigkeit: zufälliger Zug mit geringer Intelligenz
+		if self.difficulty == AIDifficulty.EASY:
+			# 70% zufällig, 30% intelligent
+			if random.random() < 0.7:
+				return random.choice(all_moves)
+		
+		# Minimax mit Alpha-Beta-Pruning
+		best_move = None
+		best_score = float('-inf')
+		alpha = float('-inf')
+		beta = float('inf')
+		
+		for move in all_moves:
+			# Simuliere den Zug
+			game_copy = self._copy_game_state(game)
+			self._execute_move(game_copy, move, player)
+			
+			# Bewerte den resultierenden Zustand
+			score = self._minimax(game_copy, self.max_depth - 1, alpha, beta, False, player)
+			
+			if score > best_score:
+				best_score = score
+				best_move = move
+				
+			alpha = max(alpha, score)
+			if beta <= alpha:
+				break  # Alpha-Beta-Pruning
+		
+		# Mindest-Denkzeit einhalten
+		elapsed = time.time() - start_time
+		if elapsed < self.thinking_time:
+			time.sleep(self.thinking_time - elapsed)
+		
+		return best_move
+	
+	def _generate_all_moves(self, game, player):
+		"""Generiert alle möglichen Züge für einen Spieler"""
+		moves = []
+		
+		# Finde alle Kugeln des Spielers
+		player_marbles = []
+		for hex_pos, marble_player in game.board.items():
+			if marble_player == player:
+				player_marbles.append(hex_pos)
+		
+		# Generiere Züge für einzelne Kugeln
+		for marble in player_marbles:
+			valid_moves = game.calculate_valid_moves([marble])
+			for target in valid_moves:
+				moves.append(([marble], target))
+		
+		# Generiere Züge für 2er-Kombinationen
+		for i in range(len(player_marbles)):
+			for j in range(i + 1, len(player_marbles)):
+				marble_combo = [player_marbles[i], player_marbles[j]]
+				if game._are_marbles_in_line(marble_combo):
+					valid_moves = game.calculate_valid_moves(marble_combo)
+					for target in valid_moves:
+						moves.append((marble_combo, target))
+		
+		# Generiere Züge für 3er-Kombinationen
+		for i in range(len(player_marbles)):
+			for j in range(i + 1, len(player_marbles)):
+				for k in range(j + 1, len(player_marbles)):
+					marble_combo = [player_marbles[i], player_marbles[j], player_marbles[k]]
+					if game._are_marbles_in_line(marble_combo):
+						valid_moves = game.calculate_valid_moves(marble_combo)
+						for target in valid_moves:
+							moves.append((marble_combo, target))
+		
+		return moves
+	
+	def _minimax(self, game, depth, alpha, beta, maximizing_player, ai_player):
+		"""Minimax-Algorithmus mit Alpha-Beta-Pruning"""
+		# Terminalbedingungen
+		winner = game.check_winner()
+		if winner == ai_player:
+			return 1000 + depth  # Bevorzuge schnelle Siege
+		elif winner is not None:
+			return -1000 - depth  # Vermeide schnelle Niederlagen
+		elif depth == 0:
+			return self._evaluate_position(game, ai_player)
+		
+		current_player = ai_player if maximizing_player else (Player.WHITE if ai_player == Player.BLACK else Player.BLACK)
+		moves = self._generate_all_moves(game, current_player)
+		
+		if not moves:
+			return self._evaluate_position(game, ai_player)
+		
+		if maximizing_player:
+			max_eval = float('-inf')
+			for move in moves:
+				game_copy = self._copy_game_state(game)
+				self._execute_move(game_copy, move, current_player)
+				eval_score = self._minimax(game_copy, depth - 1, alpha, beta, False, ai_player)
+				max_eval = max(max_eval, eval_score)
+				alpha = max(alpha, eval_score)
+				if beta <= alpha:
+					break
+			return max_eval
+		else:
+			min_eval = float('inf')
+			for move in moves:
+				game_copy = self._copy_game_state(game)
+				self._execute_move(game_copy, move, current_player)
+				eval_score = self._minimax(game_copy, depth - 1, alpha, beta, True, ai_player)
+				min_eval = min(min_eval, eval_score)
+				beta = min(beta, eval_score)
+				if beta <= alpha:
+					break
+			return min_eval
+	
+	def _evaluate_position(self, game, ai_player):
+		"""Bewertet eine Spielposition aus Sicht der KI"""
+		opponent = Player.WHITE if ai_player == Player.BLACK else Player.BLACK
+		
+		score = 0
+		
+		# 1. Scores (wichtigster Faktor)
+		score += (game.scores[ai_player] - game.scores[opponent]) * 200
+		
+		# 2. Zentrale Kontrolle
+		center_positions = [Hex(0, 0), Hex(1, 0), Hex(-1, 0), Hex(0, 1), Hex(0, -1), Hex(1, -1), Hex(-1, 1)]
+		ai_center_control = sum(1 for pos in center_positions if game.board.get(pos) == ai_player)
+		opponent_center_control = sum(1 for pos in center_positions if game.board.get(pos) == opponent)
+		score += (ai_center_control - opponent_center_control) * 10
+		
+		# 3. Zusammenhalt der Kugeln (gruppierte Kugeln sind stärker)
+		ai_cohesion = self._calculate_cohesion(game, ai_player)
+		opponent_cohesion = self._calculate_cohesion(game, opponent)
+		score += (ai_cohesion - opponent_cohesion) * 5
+		
+		# 4. Randnähe (Kugeln am Rand sind gefährdeter)
+		ai_edge_penalty = self._calculate_edge_penalty(game, ai_player)
+		opponent_edge_penalty = self._calculate_edge_penalty(game, opponent)
+		score += (opponent_edge_penalty - ai_edge_penalty) * 3
+		
+		# 5. Anzahl möglicher Züge (Mobilität)
+		ai_mobility = len(self._generate_all_moves(game, ai_player))
+		opponent_mobility = len(self._generate_all_moves(game, opponent))
+		score += (ai_mobility - opponent_mobility) * 1
+		
+		return score
+	
+	def _calculate_cohesion(self, game, player):
+		"""Berechnet den Zusammenhalt der Kugeln eines Spielers"""
+		player_marbles = [pos for pos, p in game.board.items() if p == player]
+		cohesion = 0
+		
+		for marble in player_marbles:
+			neighbors = 0
+			for direction in range(6):
+				neighbor_pos = marble.neighbor(direction)
+				if game.board.get(neighbor_pos) == player:
+					neighbors += 1
+			cohesion += neighbors
+		
+		return cohesion
+	
+	def _calculate_edge_penalty(self, game, player):
+		"""Berechnet die Strafe für Kugeln am Randbereich"""
+		penalty = 0
+		edge_positions = []
+		
+		# Bestimme Randpositionen (Positionen mit weniger als 6 Nachbarn auf dem Brett)
+		for pos in game.board:
+			neighbor_count = 0
+			for direction in range(6):
+				neighbor = pos.neighbor(direction)
+				if neighbor in game.board:
+					neighbor_count += 1
+			if neighbor_count < 6:
+				edge_positions.append(pos)
+		
+		# Zähle eigene Kugeln am Rand
+		for pos in edge_positions:
+			if game.board[pos] == player:
+				penalty += 1
+		
+		return penalty
+	
+	def _copy_game_state(self, game):
+		"""Erstellt eine Kopie des Spielzustands"""
+		new_game = AbaloneGame()
+		new_game.board = game.board.copy()
+		new_game.current_player = game.current_player
+		new_game.scores = game.scores.copy()
+		return new_game
+	
+	def _execute_move(self, game, move, player):
+		"""Führt einen Zug in einer Spielkopie aus"""
+		selected_marbles, target = move
+		game.current_player = player
+		game.make_move(selected_marbles, target)
+
+class Menu:
+	"""Basis-Klasse für alle Menüs"""
+	def __init__(self, screen, font, large_font):
+		self.screen = screen
+		self.font = font
+		self.large_font = large_font
+		self.buttons = []
+		
+	def add_button(self, x, y, width, height, text, action):
+		button = Button(x, y, width, height, text, self.font)
+		button.action = action
+		self.buttons.append(button)
+		return button
+		
+	def handle_event(self, event):
+		for button in self.buttons:
+			if button.handle_event(event):
+				return button.action
+		return None
+		
+	def draw_background(self):
+		colors = SETTINGS.get_theme_colors()
+		self.screen.fill(colors['background'])
+		
+	def draw_title(self, title, y_pos=100):
+		colors = SETTINGS.get_theme_colors()
+		title_shadow = self.large_font.render(title, True, (0, 0, 0))
+		title_surface = self.large_font.render(title, True, TEXT_COLOR)
+		title_rect = title_surface.get_rect(center=(WINDOW_WIDTH // 2, y_pos))
+		shadow_rect = title_rect.copy()
+		shadow_rect.x += 3
+		shadow_rect.y += 3
+		self.screen.blit(title_shadow, shadow_rect)
+		self.screen.blit(title_surface, title_rect)
+
+class MainMenu(Menu):
+	"""Hauptmenü des Spiels"""
+	def __init__(self, screen, font, large_font):
+		super().__init__(screen, font, large_font)
+		self.setup_buttons()
+		
+	def setup_buttons(self):
+		center_x = WINDOW_WIDTH // 2
+		button_width = 300
+		button_height = 60
+		start_y = 250
+		spacing = 80
+		
+		self.add_button(center_x - button_width//2, start_y, button_width, button_height, 
+						"Spiel starten", "start_game")
+		self.add_button(center_x - button_width//2, start_y + spacing, button_width, button_height, 
+						"KI Gegner", "ai_game")
+		self.add_button(center_x - button_width//2, start_y + spacing*2, button_width, button_height, 
+						"2 vs. 2", "team_game")
+		self.add_button(center_x - button_width//2, start_y + spacing*3, button_width, button_height, 
+						"Einstellungen", "settings")
+		self.add_button(center_x - button_width//2, start_y + spacing*4, button_width, button_height, 
+						"Beenden", "quit")
+	
+	def draw(self):
+		self.draw_background()
+		self.draw_title("Abalone")
+		
+		for button in self.buttons:
+			button.draw(self.screen)
+
+class SettingsMenu(Menu):
+	"""Einstellungsmenü"""
+	def __init__(self, screen, font, large_font):
+		super().__init__(screen, font, large_font)
+		self.setup_buttons()
+		
+	def setup_buttons(self):
+		center_x = WINDOW_WIDTH // 2
+		button_width = 280
+		button_height = 45
+		left_col_x = center_x - 320
+		right_col_x = center_x + 40
+		col_width = 280
+		
+		# Theme-Buttons (linke Spalte)
+		theme_start_y = 220
+		theme_names = ["Classic", "Dark", "Ocean", "Forest"]
+		themes = [Theme.CLASSIC, Theme.DARK, Theme.OCEAN, Theme.FOREST]
+		
+		for i, (name, theme) in enumerate(zip(theme_names, themes)):
+			prefix = "✓ " if SETTINGS.current_theme == theme else "  "
+			self.add_button(left_col_x, theme_start_y + i*55, 
+							col_width, button_height, f"{prefix}{name}", f"theme_{theme.value}")
+		
+		# Audio & KI Settings (rechte Spalte)
+		audio_start_y = 220
+		
+		# Sound-Button
+		sound_text = "✓ Sound An" if SETTINGS.sound_enabled else "  Sound Aus"
+		self.add_button(right_col_x, audio_start_y, 
+						col_width, button_height, sound_text, "toggle_sound")
+		
+		# KI-Schwierigkeit
+		ai_levels = ["Leicht", "Mittel", "Schwer"]
+		difficulties = [AIDifficulty.EASY, AIDifficulty.MEDIUM, AIDifficulty.HARD]
+		
+		for i, (name, diff) in enumerate(zip(ai_levels, difficulties)):
+			prefix = "✓ " if SETTINGS.ai_difficulty == diff else "  "
+			self.add_button(right_col_x, audio_start_y + (i+1)*55, 
+							col_width, button_height, f"{prefix}KI {name}", f"ai_{diff.value}")
+		
+		# Zurück-Button (zentriert unten)
+		self.add_button(center_x - 150, 550, 
+						300, 50, "Zurück", "back")
+	
+	def draw(self):
+		self.draw_background()
+		self.draw_title("Einstellungen")
+		
+		# Kategorie-Überschriften
+		colors = SETTINGS.get_theme_colors()
+		
+		# Linke Spalte: Themes
+		theme_title_shadow = self.font.render("🎨 Themes", True, (0, 0, 0))
+		theme_title = self.font.render("🎨 Themes", True, colors['highlight'])
+		theme_rect = theme_title.get_rect(center=(WINDOW_WIDTH // 2 - 180, 180))
+		theme_shadow_rect = theme_rect.copy()
+		theme_shadow_rect.x += 2
+		theme_shadow_rect.y += 2
+		self.screen.blit(theme_title_shadow, theme_shadow_rect)
+		self.screen.blit(theme_title, theme_rect)
+		
+		# Rechte Spalte: Audio & KI
+		settings_title_shadow = self.font.render("⚙️ Audio & KI", True, (0, 0, 0))
+		settings_title = self.font.render("⚙️ Audio & KI", True, colors['highlight'])
+		settings_rect = settings_title.get_rect(center=(WINDOW_WIDTH // 2 + 180, 180))
+		settings_shadow_rect = settings_rect.copy()
+		settings_shadow_rect.x += 2
+		settings_shadow_rect.y += 2
+		self.screen.blit(settings_title_shadow, settings_shadow_rect)
+		self.screen.blit(settings_title, settings_rect)
+		
+		# Vertikale Trennlinie
+		line_x = WINDOW_WIDTH // 2
+		line_start_y = 200
+		line_end_y = 500
+		
+		# Trennlinie mit Verlauf
+		for i in range(line_end_y - line_start_y):
+			alpha = 100 - abs(i - (line_end_y - line_start_y) // 2) * 2
+			if alpha > 20:
+				color = (*colors['board_border'], alpha)
+				line_surface = pygame.Surface((2, 1), pygame.SRCALPHA)
+				line_surface.fill(color)
+				self.screen.blit(line_surface, (line_x - 1, line_start_y + i))
+		
+		# Horizontale Trennlinien unter Kategorien
+		for col_x in [WINDOW_WIDTH // 2 - 180, WINDOW_WIDTH // 2 + 180]:
+			line_y = 200
+			line_surface = pygame.Surface((280, 2), pygame.SRCALPHA)
+			for x in range(280):
+				alpha = 80 - abs(x - 140) // 2
+				if alpha > 10:
+					color = (*colors['board_highlight'], alpha)
+					pygame.draw.rect(line_surface, color, (x, 0, 1, 2))
+			self.screen.blit(line_surface, (col_x - 140, line_y))
+		
+		# Buttons zeichnen
+		for button in self.buttons:
+			button.draw(self.screen)
+
 # Enhanced Color Scheme
 BACKGROUND_COLOR = (15, 20, 35)  # Deep navy
 BOARD_GRADIENT_START = (45, 55, 75)  # Darker blue-gray
@@ -140,13 +604,17 @@ class Button:
 		self.pressed = False
 
 	def draw(self, screen):
-		# Farbverlauf je nach Zustand
+		# Farbverlauf je nach Zustand - verwende Theme-Farben
+		colors = SETTINGS.get_theme_colors()
 		if self.hovered:
-			start_color = BUTTON_HOVER_START
-			end_color = BUTTON_HOVER_END
+			start_color = colors['button_start']
+			end_color = colors['button_end']
+			# Aufhellen für Hover-Effekt
+			start_color = tuple(min(255, c + 30) for c in start_color)
+			end_color = tuple(min(255, c + 30) for c in end_color)
 		else:
-			start_color = BUTTON_GRADIENT_START
-			end_color = BUTTON_GRADIENT_END
+			start_color = colors['button_start']
+			end_color = colors['button_end']
 		
 		# Rand zeichnen
 		border_rect = self.rect.inflate(4, 4)
@@ -559,25 +1027,91 @@ class AbaloneUI:
 		self.small_font = pygame.font.Font(None, 24)
 		self.large_font = pygame.font.Font(None, 48)
 
-		self.game = AbaloneGame()
+		# Game State Management
+		self.current_state = GameState.MAIN_MENU
+		self.game = None  # Wird erst bei Spielstart erstellt
 		self.center_x = WINDOW_WIDTH // 2
 		self.center_y = WINDOW_HEIGHT // 2
 
+		# Game-spezifische Variablen
 		self.dragging = False
 		self.drag_start = None
 		self.hovered_hex = None
 		self.selected_marbles = []
 		self.mouse_pos = (0, 0)
+		
+		# KI-spezifische Variablen
+		self.ai = None
+		self.ai_player = Player.WHITE  # KI spielt standardmäßig Weiß
+		self.ai_thinking = False
+		self.ai_move_timer = 0
 
-		# Buttons mit verbessertem Design und besserer Position
-		self.new_game_button = Button(30, 80, 200, 55, "Neues Spiel", self.small_font)
-		self.quit_button = Button(30, 150, 200, 55, "Beenden", self.small_font)
+		# Menüs
+		self.main_menu = MainMenu(self.screen, self.font, self.large_font)
+		self.settings_menu = SettingsMenu(self.screen, self.font, self.large_font)
+
+		# Buttons für Game-View (werden bei Bedarf erstellt)
+		self.new_game_button = None
+		self.quit_button = None
 
 		# Animation und Effekte
 		self.animations = []
 		self.particles = []
 		self.background_pattern = self._create_background_pattern()
 		self.animation_time = 0
+	
+	def start_game(self, game_mode):
+		"""Startet ein neues Spiel im angegebenen Modus"""
+		self.game = AbaloneGame()
+		self.selected_marbles = []
+		self.current_state = game_mode
+		
+		# KI-Setup für KI-Spiele
+		if game_mode == GameState.GAME_AI:
+			self.ai = AbaloneAI(SETTINGS.ai_difficulty)
+			self.ai_player = Player.WHITE  # KI spielt Weiß
+			self.ai_thinking = False
+		else:
+			self.ai = None
+		
+		# Erstelle Game-UI-Buttons
+		self.new_game_button = Button(30, 20, 120, 40, "Menü", self.small_font)
+		self.quit_button = Button(30, 70, 120, 40, "Beenden", self.small_font)
+	
+	def handle_menu_action(self, action):
+		"""Behandelt Menü-Aktionen"""
+		if action == "start_game":
+			self.start_game(GameState.GAME_PVP)
+		elif action == "ai_game":
+			self.start_game(GameState.GAME_AI)
+		elif action == "team_game":
+			self.start_game(GameState.GAME_2V2)
+		elif action == "settings":
+			self.current_state = GameState.SETTINGS
+		elif action == "quit":
+			return "quit"
+		elif action == "back":
+			self.current_state = GameState.MAIN_MENU
+		elif action.startswith("theme_"):
+			theme_name = action.split("_")[1]
+			for theme in Theme:
+				if theme.value == theme_name:
+					SETTINGS.current_theme = theme
+					break
+			# Menü neu aufbauen um Checkmarks zu aktualisieren
+			self.settings_menu = SettingsMenu(self.screen, self.font, self.large_font)
+		elif action == "toggle_sound":
+			SETTINGS.sound_enabled = not SETTINGS.sound_enabled
+			self.settings_menu = SettingsMenu(self.screen, self.font, self.large_font)
+		elif action.startswith("ai_"):
+			difficulty_level = int(action.split("_")[1])
+			for diff in AIDifficulty:
+				if diff.value == difficulty_level:
+					SETTINGS.ai_difficulty = diff
+					break
+			self.settings_menu = SettingsMenu(self.screen, self.font, self.large_font)
+		
+		return None
 
 	def _create_background_pattern(self):
 		"""Erstellt ein Hintergrundmuster"""
@@ -746,9 +1280,10 @@ class AbaloneUI:
 		pygame.draw.polygon(self.screen, BOARD_HIGHLIGHT_COLOR, inner_points, 1)
 
 	def draw_board(self):
-		"""Zeichnet das verbesserte Spielbrett"""
-		# Zeichne animierten Hintergrund
-		self.screen.blit(self.background_pattern, (0, 0))
+		"""Zeichnet das verbesserte Spielbrett mit Theme-Farben"""
+		# Verwende Theme-Farben
+		colors = SETTINGS.get_theme_colors()
+		self.screen.fill(colors['background'])
 		
 		# Subtile Animation des Hintergrunds
 		self.animation_time += 0.02
@@ -865,91 +1400,64 @@ class AbaloneUI:
 				self.screen.blit(s, (x - radius * 1.5, y - radius * 1.5))
 
 	def draw_ui(self):
-		"""Zeichnet die verbesserten UI-Elemente"""
-		# Rechtes UI-Panel mit verbesserter Größe und Position
-		ui_rect = pygame.Rect(WINDOW_WIDTH - 380, 80, 350, 250)
+		"""Zeichnet die kompaktere UI-Info-Box"""
+		# Kleineres UI-Panel rechts oben
+		ui_rect = pygame.Rect(WINDOW_WIDTH - 280, 20, 250, 180)
 		
-		# Panel-Hintergrund mit stärkerem Kontrast
+		# Kompakte Panel-Darstellung
+		colors = SETTINGS.get_theme_colors()
 		panel_bg = pygame.Surface((ui_rect.width, ui_rect.height), pygame.SRCALPHA)
 		draw_gradient_rect(panel_bg, pygame.Rect(0, 0, ui_rect.width, ui_rect.height), 
-						  (35, 40, 60, 220), (55, 65, 85, 220))
+						  (*colors['board_start'], 200), (*colors['board_end'], 200))
 		self.screen.blit(panel_bg, ui_rect.topleft)
 		
-		# Rand mit besserer Sichtbarkeit
-		pygame.draw.rect(self.screen, (80, 90, 110), ui_rect, 3, border_radius=12)
-		pygame.draw.rect(self.screen, (120, 130, 150), ui_rect, 1, border_radius=12)
+		# Rand
+		pygame.draw.rect(self.screen, colors['board_border'], ui_rect, 2, border_radius=8)
 		
-		# Spieler-Info mit verbesserter Lesbarkeit
+		# Kompakte Spieler-Info
 		player_text = "Schwarz" if self.game.current_player == Player.BLACK else "Weiß"
-		player_color = (220, 220, 230) if self.game.current_player == Player.BLACK else (255, 255, 255)
 		
-		# Aktueller Spieler - größerer Text
-		current_player_text = f"Am Zug:"
-		player_name_text = f"{player_text}"
-		
-		# Header-Text
-		header_shadow = self.font.render(current_player_text, True, (0, 0, 0, 180))
-		header_text = self.font.render(current_player_text, True, (200, 210, 230))
-		self.screen.blit(header_shadow, (ui_rect.x + 21, ui_rect.y + 21))
-		self.screen.blit(header_text, (ui_rect.x + 20, ui_rect.y + 20))
-		
-		# Spielername - noch größer und farbig
-		name_shadow = self.large_font.render(player_name_text, True, (0, 0, 0, 200))
-		name_text = self.large_font.render(player_name_text, True, player_color)
-		self.screen.blit(name_shadow, (ui_rect.x + 21, ui_rect.y + 51))
-		self.screen.blit(name_text, (ui_rect.x + 20, ui_rect.y + 50))
+		# Am Zug Text (kompakt)
+		turn_text = f"Am Zug: {player_text}"
+		turn_shadow = self.small_font.render(turn_text, True, (0, 0, 0))
+		turn_surface = self.small_font.render(turn_text, True, TEXT_COLOR)
+		self.screen.blit(turn_shadow, (ui_rect.x + 11, ui_rect.y + 11))
+		self.screen.blit(turn_surface, (ui_rect.x + 10, ui_rect.y + 10))
 
-		# Punktestand-Sektion mit besserer Strukturierung
-		score_y_start = ui_rect.y + 100
+		# Kompakte Scores
+		black_text = f"Schwarz: {self.game.scores[Player.BLACK]}/6"
+		white_text = f"Weiß: {self.game.scores[Player.WHITE]}/6"
 		
-		# "Punktestand" Titel
-		score_title_shadow = self.font.render("Punktestand:", True, (0, 0, 0, 180))
-		score_title = self.font.render("Punktestand:", True, (200, 210, 230))
-		self.screen.blit(score_title_shadow, (ui_rect.x + 21, score_y_start + 1))
-		self.screen.blit(score_title, (ui_rect.x + 20, score_y_start))
+		black_shadow = self.small_font.render(black_text, True, (0, 0, 0))
+		black_surface = self.small_font.render(black_text, True, (180, 180, 190))
+		white_shadow = self.small_font.render(white_text, True, (0, 0, 0))
+		white_surface = self.small_font.render(white_text, True, (255, 255, 255))
 		
-		# Schwarz Score
-		black_score_text = f"Schwarz: {self.game.scores[Player.BLACK]}/6"
-		black_shadow = self.font.render(black_score_text, True, (0, 0, 0, 200))
-		black_score = self.font.render(black_score_text, True, (180, 180, 190))
-		self.screen.blit(black_shadow, (ui_rect.x + 21, score_y_start + 31))
-		self.screen.blit(black_score, (ui_rect.x + 20, score_y_start + 30))
+		self.screen.blit(black_shadow, (ui_rect.x + 11, ui_rect.y + 41))
+		self.screen.blit(black_surface, (ui_rect.x + 10, ui_rect.y + 40))
+		self.screen.blit(white_shadow, (ui_rect.x + 11, ui_rect.y + 61))
+		self.screen.blit(white_surface, (ui_rect.x + 10, ui_rect.y + 60))
 		
-		# Weiß Score
-		white_score_text = f"Weiß: {self.game.scores[Player.WHITE]}/6"
-		white_shadow = self.font.render(white_score_text, True, (0, 0, 0, 200))
-		white_score = self.font.render(white_score_text, True, (255, 255, 255))
-		self.screen.blit(white_shadow, (ui_rect.x + 21, score_y_start + 61))
-		self.screen.blit(white_score, (ui_rect.x + 20, score_y_start + 60))
-		
-		# Score-Balken mit besserer Sichtbarkeit
-		bar_width = 250
-		bar_height = 12
-		bar_x = ui_rect.x + 20
+		# Kompakte Progress-Balken
+		bar_width = 200
+		bar_height = 8
+		bar_x = ui_rect.x + 10
 		
 		# Schwarz Balken
-		black_bar_rect = pygame.Rect(bar_x, score_y_start + 95, bar_width, bar_height)
-		pygame.draw.rect(self.screen, (40, 45, 60), black_bar_rect, border_radius=6)
-		pygame.draw.rect(self.screen, (70, 75, 90), black_bar_rect, 2, border_radius=6)
-		
-		black_progress = pygame.Rect(bar_x, score_y_start + 95, 
+		black_bar = pygame.Rect(bar_x, ui_rect.y + 85, bar_width, bar_height)
+		pygame.draw.rect(self.screen, colors['board_border'], black_bar, border_radius=4)
+		black_progress = pygame.Rect(bar_x, ui_rect.y + 85, 
 									(bar_width * self.game.scores[Player.BLACK]) // 6, bar_height)
 		if black_progress.width > 0:
-			pygame.draw.rect(self.screen, (120, 120, 140), black_progress, border_radius=6)
+			pygame.draw.rect(self.screen, (120, 120, 140), black_progress, border_radius=4)
 		
 		# Weiß Balken
-		white_bar_rect = pygame.Rect(bar_x, score_y_start + 115, bar_width, bar_height)
-		pygame.draw.rect(self.screen, (40, 45, 60), white_bar_rect, border_radius=6)
-		pygame.draw.rect(self.screen, (70, 75, 90), white_bar_rect, 2, border_radius=6)
-		
-		white_progress = pygame.Rect(bar_x, score_y_start + 115, 
+		white_bar = pygame.Rect(bar_x, ui_rect.y + 100, bar_width, bar_height)
+		pygame.draw.rect(self.screen, colors['board_border'], white_bar, border_radius=4)
+		white_progress = pygame.Rect(bar_x, ui_rect.y + 100, 
 									(bar_width * self.game.scores[Player.WHITE]) // 6, bar_height)
 		if white_progress.width > 0:
-			pygame.draw.rect(self.screen, (255, 255, 255), white_progress, border_radius=6)
-
-		# Buttons mit mehr Abstand zum Panel
-		self.new_game_button.draw(self.screen)
-		self.quit_button.draw(self.screen)
+			pygame.draw.rect(self.screen, (255, 255, 255), white_progress, border_radius=4)
 
 		# Gewinner-Nachricht mit Effekt
 		winner = self.game.check_winner()
@@ -1046,6 +1554,10 @@ class AbaloneUI:
 		if hex_pos not in self.game.board:
 			return
 
+		# Bei KI-Spiel: Verhindere Klicks wenn KI am Zug ist
+		if self.ai and self.game.current_player == self.ai_player:
+			return
+
 		marble = self.game.board[hex_pos]
 
 		# Klick auf eigene Kugel
@@ -1069,7 +1581,7 @@ class AbaloneUI:
 				self.game.valid_moves = set()
 
 	def run(self):
-		"""Hauptspiel-Loop"""
+		"""Hauptspiel-Loop mit State-Management"""
 		running = True
 
 		while running:
@@ -1079,43 +1591,59 @@ class AbaloneUI:
 					running = False
 
 				elif event.type == pygame.MOUSEBUTTONDOWN:
-					if self.new_game_button.handle_event(event):
-						self.game.reset_game()
-						self.selected_marbles = []
-					elif self.quit_button.handle_event(event):
-						running = False
-					else:
-						self.handle_click(event.pos)
+					if self.current_state == GameState.MAIN_MENU:
+						action = self.main_menu.handle_event(event)
+						if action:
+							result = self.handle_menu_action(action)
+							if result == "quit":
+								running = False
+								
+					elif self.current_state == GameState.SETTINGS:
+						action = self.settings_menu.handle_event(event)
+						if action:
+							result = self.handle_menu_action(action)
+							if result == "quit":
+								running = False
+								
+					elif self.current_state in [GameState.GAME_PVP, GameState.GAME_AI, GameState.GAME_2V2]:
+						# Game-spezifische Event-Behandlung
+						if self.new_game_button and self.new_game_button.handle_event(event):
+							self.current_state = GameState.MAIN_MENU
+						elif self.quit_button and self.quit_button.handle_event(event):
+							running = False
+						else:
+							# Nur Klicks verarbeiten wenn KI nicht am Denken ist
+							if not self.ai_thinking:
+								self.handle_click(event.pos)
 
 				elif event.type == pygame.MOUSEMOTION:
 					self.mouse_pos = event.pos
-					self.new_game_button.handle_event(event)
-					self.quit_button.handle_event(event)
+					
+					# Menü-Hover-Effekte
+					if self.current_state == GameState.MAIN_MENU:
+						self.main_menu.handle_event(event)
+					elif self.current_state == GameState.SETTINGS:
+						self.settings_menu.handle_event(event)
+					elif self.current_state in [GameState.GAME_PVP, GameState.GAME_AI, GameState.GAME_2V2]:
+						# Game-spezifische Hover-Behandlung
+						if self.new_game_button:
+							self.new_game_button.handle_event(event)
+						if self.quit_button:
+							self.quit_button.handle_event(event)
 
-					# Update hover
-					self.hovered_hex = self.pixel_to_hex(*event.pos)
-					if self.hovered_hex not in self.game.board:
-						self.hovered_hex = None
+						# Update hover für Hexagons
+						if self.game:
+							self.hovered_hex = self.pixel_to_hex(*event.pos)
+							if self.hovered_hex not in self.game.board:
+								self.hovered_hex = None
 
-			# Bildschirm zeichnen
-			# Zeichne Brett (enthält jetzt Hintergrund)
-			self.draw_board()
-
-			# Zeichne Kugeln
-			for hex_pos, player in self.game.board.items():
-				if player != Player.EMPTY:
-					selected = hex_pos in self.selected_marbles
-					self.draw_marble(hex_pos, player, selected)
-
-			# Zeichne Vorschau
-			self.draw_preview()
-
-			# Update und zeichne Partikel
-			self.update_particles()
-			self.draw_particles()
-
-			# Zeichne UI
-			self.draw_ui()
+			# Bildschirm zeichnen basierend auf aktuellem State
+			if self.current_state == GameState.MAIN_MENU:
+				self.main_menu.draw()
+			elif self.current_state == GameState.SETTINGS:
+				self.settings_menu.draw()
+			elif self.current_state in [GameState.GAME_PVP, GameState.GAME_AI, GameState.GAME_2V2]:
+				self.draw_game()
 
 			# Update
 			pygame.display.flip()
@@ -1123,6 +1651,102 @@ class AbaloneUI:
 
 		pygame.quit()
 		sys.exit()
+	
+	def draw_game(self):
+		"""Zeichnet das Spiel"""
+		if not self.game:
+			return
+			
+		# KI-Update (falls KI-Spiel)
+		self.update_ai()
+			
+		# Zeichne Brett (enthält jetzt Hintergrund)
+		self.draw_board()
+
+		# Zeichne Kugeln
+		for hex_pos, player in self.game.board.items():
+			if player != Player.EMPTY:
+				selected = hex_pos in self.selected_marbles
+				self.draw_marble(hex_pos, player, selected)
+
+		# Zeichne Vorschau (nur wenn nicht KI am Zug)
+		if not self.ai_thinking:
+			self.draw_preview()
+
+		# Update und zeichne Partikel
+		self.update_particles()
+		self.draw_particles()
+
+		# Zeichne kompakte UI
+		self.draw_ui()
+		
+		# Zeichne Game-Buttons
+		if self.new_game_button:
+			self.new_game_button.draw(self.screen)
+		if self.quit_button:
+			self.quit_button.draw(self.screen)
+			
+		# Zeichne KI-Status
+		if self.ai_thinking:
+			self.draw_ai_thinking()
+	
+	def update_ai(self):
+		"""Aktualisiert die KI-Logik"""
+		if not self.ai or self.current_state != GameState.GAME_AI:
+			return
+			
+		# Prüfe ob KI am Zug ist
+		if self.game.current_player == self.ai_player and not self.ai_thinking:
+			# Starte KI-Denkprozess in eigenem Thread
+			import threading
+			self.ai_thinking = True
+			self.selected_marbles = []  # Deselektiere alle Kugeln
+			
+			def ai_move_thread():
+				try:
+					ai_move = self.ai.get_best_move(self.game, self.ai_player)
+					if ai_move:
+						selected_marbles, target_hex = ai_move
+						# Führe den Zug aus
+						if self.game.make_move(selected_marbles, target_hex):
+							# Partikel-Effekt für KI-Zug
+							pixel_pos = self.hex_to_pixel(target_hex)
+							self.add_particle_effect(pixel_pos, HIGHLIGHT_COLOR, 12)
+				except Exception as e:
+					print(f"KI-Fehler: {e}")
+				finally:
+					self.ai_thinking = False
+			
+			threading.Thread(target=ai_move_thread, daemon=True).start()
+	
+	def draw_ai_thinking(self):
+		"""Zeichnet KI-Denkstatus"""
+		colors = SETTINGS.get_theme_colors()
+		
+		# Thinking-Box
+		think_rect = pygame.Rect(WINDOW_WIDTH // 2 - 150, 50, 300, 60)
+		
+		# Panel mit Animation
+		panel_bg = pygame.Surface((think_rect.width, think_rect.height), pygame.SRCALPHA)
+		draw_gradient_rect(panel_bg, pygame.Rect(0, 0, think_rect.width, think_rect.height),
+						  (*colors['button_start'], 180), (*colors['button_end'], 180))
+		self.screen.blit(panel_bg, think_rect.topleft)
+		
+		pygame.draw.rect(self.screen, colors['board_border'], think_rect, 2, border_radius=8)
+		
+		# Animierter Text
+		dots = "." * ((int(self.animation_time * 3) % 4) + 1)
+		think_text = f"KI denkt{dots}"
+		
+		think_shadow = self.font.render(think_text, True, (0, 0, 0))
+		think_surface = self.font.render(think_text, True, TEXT_COLOR)
+		think_text_rect = think_surface.get_rect(center=think_rect.center)
+		think_shadow_rect = think_text_rect.copy()
+		think_shadow_rect.x += 2
+		think_shadow_rect.y += 2
+		
+		self.screen.blit(think_shadow, think_shadow_rect)
+		self.screen.blit(think_surface, think_text_rect)
 
 
 if __name__ == "__main__":
